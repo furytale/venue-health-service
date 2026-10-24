@@ -11,3 +11,7 @@ Scope and exclusions:
 - Earlier planning or product-brief conversations were not supplied in this checkout or identified in the relevant exports. They are unavailable here; no earlier conversation was reconstructed.
 
 The implementation request is the starting point: 2026-10-24 12:45:03 UTC, with a 20-minute remaining budget. Delegated files begin at 12:45:23–12:45:33 UTC. Source root session ID: `01a16de1-1c70-7650-bdbc-9d60dd4cebfb`.
+
+## Diagnostic review follow-up
+
+`diagnostic-follow-up-2026-10-24.jsonl` is a separate verbatim excerpt beginning with the follow-up request at 2026-10-24T13:05:34.333Z, exported from the same root session record named above. This work occurred after the initial implementation and is not backdated into its time budget. The excerpt includes available user/visible-assistant message lines only, under the same exclusions, and ends at export time before the final handoff. Original implementation excerpts remain unchanged.

@@ -8,7 +8,7 @@ export class JsonLogger {
   error(event: string, fields?: Record<string, unknown>): void { this.log('error', event, fields); }
   log(level: LogLevel, event: string, fields: Readonly<Record<string, unknown>> = {}): void {
     if (ranks[level] < ranks[this.level]) return;
-    // Call sites pass identifiers/codes only; never raw HTTP bodies or headers.
+    // Call sites pass identifiers/codes and bounded diagnostics, never raw errors/bodies/headers.
     const safe = Object.fromEntries(Object.entries(fields).filter(([key]) => !/secret|authorization|api.?key|payload|body/i.test(key)).map(([key, value]) => [key, typeof value === 'string' ? value.replace(/[\r\n\x00-\x1f]/g, ' ').slice(0, 512) : value]));
     const line = JSON.stringify({...safe, timestamp: new Date().toISOString(), level, event, component: fields.component ?? 'service'});
     (ranks[level] >= 40 ? process.stderr : process.stdout).write(line + '\n');

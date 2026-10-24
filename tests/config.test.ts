@@ -40,5 +40,16 @@ test('invalid startup configuration exits nonzero before starting HTTP and never
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, /configuration_invalid/);
   assert.match(result.stderr, /PORT/);
+  const fatalLine = result.stderr.split('\n').find(line => line.includes('"event":"fatal_exception"'));
+  assert.ok(fatalLine);
+  assert.match(fatalLine, /settings\.ts:\d+:\d+/);
+  assert.doesNotMatch(fatalLine, /Invalid configuration|must-never-appear-in-output/);
   assert.doesNotMatch(result.stdout + result.stderr, /service_started|must-never-appear-in-output/);
+  const failedSink = spawnSync(process.execPath, ['--import', 'tsx', '-e',
+    "require('./src/adapters/logger').JsonLogger.prototype.log = () => { throw new Error('sink unavailable'); }; require('./src/main');"], {
+    cwd: process.cwd(), encoding: 'utf8', timeout: 10000,
+    env: { ...process.env, ...required, PORT: '0' },
+  });
+  assert.equal(failedSink.status, 1, 'A failed best-effort diagnostic write must still terminate nonzero');
+  assert.equal(failedSink.signal, null, 'Fatal termination must not wait for the subprocess timeout');
 });

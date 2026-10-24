@@ -154,10 +154,17 @@ test('attempt-start storage failure prevents transport', async () => {
     seed(f.store, 'A', 1);
     f.store.db.exec("CREATE TRIGGER fail_start BEFORE INSERT ON delivery_attempts BEGIN SELECT RAISE(ABORT,'injected failure'); END");
     const events: string[] = [];
-    const dispatcher = new DeliveryDispatcher(f.repository, f.client, config, f.clock, () => 0, (_level, event) => events.push(event));
+    const failures: unknown[] = [];
+    const dispatcher = new DeliveryDispatcher(f.repository, f.client, config, f.clock, () => 0, (_level, event, fields) => {
+      events.push(event);
+      if (event === 'delivery.storage_unavailable') failures.push(fields.diagnostic);
+    });
     await dispatcher.runOnce();
     f.advance(100); await dispatcher.runOnce();
     assert.equal(events.filter(event => event === 'delivery.storage_unavailable').length, 1);
+    assert.match(JSON.stringify(failures), /SQLITE_CONSTRAINT_TRIGGER/);
+    assert.match(JSON.stringify(failures), /delivery-store\.ts:\d+:\d+/);
+    assert.doesNotMatch(JSON.stringify(failures), /injected failure|CREATE TRIGGER/);
     assert.equal(events.filter(event => event === 'delivery.storage_recovered').length, 0);
     assert.equal(f.fake.requests.length, 0);
     assert.equal(state(f.store, 'A-1').state, 'pending');

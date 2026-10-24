@@ -2,11 +2,15 @@ import { existsSync } from 'node:fs';
 import { createService } from './app';
 import { loadSettings } from './config/settings';
 import { JsonLogger } from './adapters/logger';
+import { errorDiagnostic } from './application/error-diagnostic';
 
 const fatalLogger = new JsonLogger();
 function fatal(error: unknown): never {
-  fatalLogger.log('fatal', 'fatal_exception', {component: 'bootstrap', errorName: error instanceof Error ? error.name : 'UnknownError', code: error instanceof Error && 'code' in error ? error.code : undefined});
-  process.exit(1);
+  try {
+    const diagnostic = errorDiagnostic(error);
+    fatalLogger.log('fatal', 'fatal_exception', {component: 'bootstrap', errorName: diagnostic.name, code: diagnostic.code, diagnostic});
+  } catch { /* Best effort only: a failed stderr write must not prevent termination. */ }
+  finally { process.exit(1); }
 }
 process.on('uncaughtException', fatal);
 process.on('unhandledRejection', fatal);

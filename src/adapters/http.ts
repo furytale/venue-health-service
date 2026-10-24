@@ -1,6 +1,7 @@
 import { ArgumentsHost, Body, Catch, Controller, ExceptionFilter, Get, HttpCode, HttpException, Inject, Param, Post, Query, Req } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AdmissionUseCase, QueryUseCase } from '../application/core';
+import { errorDiagnostic } from '../application/error-diagnostic';
 import { ApplicationError, ValidationError } from '../domain/errors';
 import { Kind } from '../domain/model';
 import { validateMessage, validateVenueId } from '../domain/validation';
@@ -29,7 +30,8 @@ export function sendError(error: unknown, request: Request, response: Response, 
     else if (error.type === 'encoding.unsupported' || error.type === 'charset.unsupported') { status = 415; code = 'UNSUPPORTED_MEDIA_TYPE'; message = 'Unsupported request encoding'; }
   }
   const id = requestId(request);
-  logger.log(status >= 500 ? 'error' : 'warn', 'request_failed', {component: 'http', requestId: id, code, httpStatus: status});
+  logger.log(status >= 500 ? 'error' : 'warn', 'request_failed', {component: 'http', requestId: id, code, httpStatus: status,
+    ...(status >= 500 ? { diagnostic: errorDiagnostic(error) } : {})});
   response.status(status).json({error: {code, message, requestId: id}});
 }
 @Catch()

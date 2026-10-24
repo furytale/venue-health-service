@@ -126,7 +126,7 @@ npm run build
 npm test
 ```
 
-Final verification on Node 24.12.0, 2026-10-24:
+Initial implementation verification on Node 24.12.0, 2026-10-24:
 
 | Check | Result |
 | --- | --- |
@@ -137,7 +137,9 @@ Final verification on Node 24.12.0, 2026-10-24:
 | `git diff --check` | Passed |
 | Dependency install audit after patched override | 0 vulnerabilities reported |
 
-The full suite contains 14 policy/validation tests, 16 SQLite/recovery tests, 11 delivery tests, 3 HTTP tests, 3 configuration tests, and 1 real process-restart test. It uses temporary on-disk databases and actual HTTP sockets. The 50-venue outage scenario performs real validated admission and lifecycle processing before simulating one hour with a controlled clock; all 100 publications drain in per-venue order.
+The initial 48-test suite contains 14 policy/validation tests, 16 SQLite/recovery tests, 11 delivery tests, 3 HTTP tests, 3 configuration tests, and 1 real process-restart test. It uses temporary on-disk databases and actual HTTP sockets. The 50-venue outage scenario performs real validated admission and lifecycle processing before simulating one hour with a controlled clock; all 100 publications drain in per-venue order.
+
+Diagnostic review follow-up verification (2026-10-24, Node 24.12.0): the focused serializer tests passed 3/3, focused HTTP/inbox/delivery/fatal regressions passed 4/4, and the added failed-logger fatal assertion passed. After the final relevant change, `npm run typecheck`, `npm run build`, and `node --import tsx --test tests/*.test.ts` passed: **52 tests, 0 failures, 0 skips** (the original 48 plus four focused diagnostic tests). The package test command is unchanged. Localhost tests required sandbox escalation after EPERM; `git diff --check` also passed. Earlier smoke/audit results above were not rerun for this diagnostic-only follow-up.
 
 The process-restart test receives HTTP 202, sends SIGKILL before inbox processing, independently verifies the pending row, restarts the same database, verifies sequences 1/2 at the fake, and verifies duplicate receipt identity after restart. Other delivery restart tests reopen the database; they do not claim an actual process kill. SQL triggers/deferred constraints and a competing SQLite writer exercise real transaction rejection, rollback and storage contention. No assertions were disabled or weakened. Run these scripts from the repository root.
 
@@ -146,5 +148,7 @@ The process-restart test receives HTTP 202, sends SIGKILL before inbox processin
 **Which failure behavior is not covered by tests?** Power loss/filesystem synchronization failure, disk destruction/full filesystem, physical I/O corruption, OS OOM, every individual machine-instruction crash window, and real remote-service idempotency are not established by local tests. No process was killed during the processing transaction, between its commit and response transmission, or between remote application and the local delivery marker; those boundaries were exercised through transaction faults, response loss or connection reopening where indicated. Transaction exceptions and database reopening are reported separately from actual process termination. Device clock resets/skew, trust in engineering UTC timestamps, unseen pre-reset reports, and delayed operator creation order retain SPEC's limitations. No throughput/long-duration load qualification or backup/restore validation is claimed.
 
 SIGINT/SIGTERM stops new admission/background cycles, drains in-flight delivery, then aborts remaining network work and closes storage within a bounded shutdown path. A final hard deadline exits nonzero if draining fails. SIGKILL has no final-write/log guarantee; committed work resumes when storage survives. Diagnostics are structured JSON independent of SQLite, with request/inbox/source/venue/publication/attempt correlation where available. Expected failures use safe codes; accepted bodies remain private in SQLite.
+
+The subsequent diagnostic review fix adds a bounded `diagnostic` object to unexpected HTTP, blocked-inbox, storage-outage and fatal logs. It retains validated error name/code tokens and source filename/line/column locations, with both `cause` and `internalCause`: at most four nodes, three levels, four frames per node, 64-character name/code fields, 120-character locations, and less than 4096 serialized bytes. Exception messages, full stack headers, directories, function labels and arbitrary error properties are omitted; unrecognized stack formats may have no frames. Cycles/non-Error throws have fixed markers. These details never enter public responses or persistent audit records; audit error names use fixed classifications. Outage suppression is unchanged. Fatal logging remains a best-effort bounded write followed by exit 1, including if the logger throws, with no drain or final-log guarantee.
 
 For three replicas, use a shared transactional database with global identity uniqueness, per-venue serialization, atomic state/outbox updates, durable worker leases and fencing. Independent SQLite files, or a shared network SQLite file, do not provide that design. Multi-replica deployment remains unimplemented.

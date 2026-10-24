@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import { createService } from '../src/app';
 import { loadSettings } from '../src/config/settings';
 import { isRecord } from '../src/domain/validation';
+import { JsonLogger } from '../src/adapters/logger';
 
 function record(value: unknown): Record<string, unknown> { assert.ok(isRecord(value)); return value; }
 async function body(response: Response): Promise<Record<string, unknown>> { const value: unknown = await response.json(); return record(value); }
@@ -21,6 +22,35 @@ async function fixture(t: TestContext, extra: Record<string, string> = {}) {
   const post = (value: unknown, path = '/api/reports') => fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) });
   return { service, path, baseUrl, post };
 }
+
+test('unexpected HTTP and wrapped SQLite failures retain diagnostic locations without exposing them publicly', async t => {
+  const logs: Record<string, unknown>[] = [];
+  t.mock.method(JsonLogger.prototype, 'log', (_level: string, event: string, fields: Record<string, unknown>) => {
+    if (event === 'request_failed') logs.push(fields);
+  });
+  const f = await fixture(t);
+  const injected = t.mock.method(f.service.store, 'venueView', () => {
+    throw new Error('Review sentinel failure\n    at /private/private-diagnostic-secret.js:1:1');
+  });
+  const unexpected = await fetch(`${f.baseUrl}/api/venues/V1`);
+  assert.equal(unexpected.status, 500);
+  const response = await body(unexpected);
+  assert.deepEqual(response, { error: { code: 'INTERNAL_ERROR', message: 'Unexpected request-processing error', requestId: unexpected.headers.get('x-request-id') } });
+  assert.equal(logs[0]?.requestId, unexpected.headers.get('x-request-id'));
+  assert.match(JSON.stringify(logs[0]?.diagnostic), /http\.test\.ts:\d+:\d+/);
+  assert.doesNotMatch(JSON.stringify(logs), /Review sentinel|private-diagnostic-secret/);
+  injected.mock.restore();
+  f.service.store.db.pragma('query_only = ON');
+  const unavailable = await f.post(report);
+  assert.equal(unavailable.status, 503);
+  const publicError = await body(unavailable);
+  assert.equal(record(publicError.error).code, 'STORAGE_UNAVAILABLE');
+  const diagnostic = record(logs[1]?.diagnostic);
+  assert.equal(diagnostic.code, 'STORAGE_UNAVAILABLE');
+  assert.equal(record(diagnostic.internalCause).code, 'SQLITE_READONLY');
+  assert.doesNotMatch(JSON.stringify([response, publicError]), /frames|internalCause|SQLITE_READONLY|\.ts|Review sentinel/);
+  f.service.store.db.pragma('query_only = OFF');
+});
 
 test('HTTP admits ten concurrent duplicates durably once, preserves first receipt, and processes once', async t => {
   const f = await fixture(t);

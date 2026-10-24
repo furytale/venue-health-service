@@ -1,3 +1,5 @@
+import { errorDiagnostic, type ErrorDiagnostic } from './error-diagnostic';
+
 export interface Publication {
   id: string;
   venueId: string;
@@ -45,7 +47,7 @@ export interface DeliveryConfig {
   retryJitterRatio: number;
 }
 export type DeliveryLogger = (level: 'debug' | 'info' | 'warn' | 'error', event: string,
-  fields: Record<string, string | number | null>) => void;
+  fields: Record<string, string | number | null | ErrorDiagnostic>) => void;
 
 /** One dispatcher per process; durable attempt records survive loss of the in-memory guards. */
 export class DeliveryDispatcher {
@@ -81,8 +83,8 @@ export class DeliveryDispatcher {
     if (!this.running) return;
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.runOnce().then(() => this.schedule(this.config.pollIntervalMs)).catch(() => {
-        this.pauseStorage();
+      void this.runOnce().then(() => this.schedule(this.config.pollIntervalMs)).catch(error => {
+        this.pauseStorage(error);
         this.schedule(this.config.storageRetryDelayMs);
       });
     }, delay);
@@ -111,8 +113,8 @@ export class DeliveryDispatcher {
         try {
           attempt = this.repository.startAttempt(publication, this.clock());
           this.storageRecovered();
-        } catch {
-          this.pauseStorage();
+        } catch (error) {
+          this.pauseStorage(error);
           break;
         }
         this.cursor = publication.venueId;
@@ -120,13 +122,13 @@ export class DeliveryDispatcher {
         work.push(this.deliver(publication, attempt));
       }
       await Promise.all(work);
-    } catch {
-      this.pauseStorage();
+    } catch (error) {
+      this.pauseStorage(error);
     }
   }
 
-  private pauseStorage(): void {
-    if (!this.storageOutage) this.log('error', 'delivery.storage_unavailable', {});
+  private pauseStorage(error: unknown): void {
+    if (!this.storageOutage) this.log('error', 'delivery.storage_unavailable', { diagnostic: errorDiagnostic(error) });
     this.storageOutage = true;
     this.pausedUntil = this.clock() + this.config.storageRetryDelayMs;
   }
@@ -150,8 +152,8 @@ export class DeliveryDispatcher {
         this.repository.finishAttempt(completion);
         this.unsaved.delete(attempt.id);
         this.storageRecovered();
-      } catch {
-        this.pauseStorage();
+      } catch (error) {
+        this.pauseStorage(error);
       }
       const saved = !this.unsaved.has(attempt.id);
       this.log(!saved || completion.state === 'blocked' ? 'error' : completion.state === 'delivered' ? 'info' : 'warn',
@@ -215,7 +217,7 @@ export class DeliveryDispatcher {
     }
     for (const [id, completion] of this.unsaved) {
       try { this.repository.finishAttempt(completion); this.unsaved.delete(id); }
-      catch { this.log('error', 'delivery.shutdown_unsaved_outcome', { attemptId: id }); break; }
+      catch (error) { this.log('error', 'delivery.shutdown_unsaved_outcome', { attemptId: id, diagnostic: errorDiagnostic(error) }); break; }
     }
   }
 }

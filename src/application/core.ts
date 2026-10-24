@@ -3,6 +3,7 @@ import type { Message, ValidationConfig, PolicyResult } from '../domain/model';
 import { LifecyclePolicy } from '../domain/policy';
 import { validateMessage, validateVenueId } from '../domain/validation';
 import type { AdmissionResult, Clock, CoreRepository, DiagnosticLogger, InboxRecord } from './ports';
+import { errorClassName, errorDiagnostic } from './error-diagnostic';
 
 export class AdmissionUseCase {
   constructor(private readonly repository: CoreRepository, private readonly clock: Clock, private readonly logger?: DiagnosticLogger) {}
@@ -57,9 +58,9 @@ export class ProcessInboxUseCase {
       } catch (error) {
         if (error instanceof StorageError) throw error;
         const code = error instanceof ApplicationError ? error.code : 'PROCESSING_ERROR';
-        const errorName = (error instanceof Error ? error.name : 'NonErrorThrown').replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 128);
+        const errorName = errorClassName(error);
         this.repository.blockInbox(inbox, code, at, { errorName });
-        this.logger?.error('inbox_blocked', { ...correlation, errorCode: code, errorName, durationMs: this.clock.now() - started });
+        this.logger?.error('inbox_blocked', { ...correlation, errorCode: code, errorName, diagnostic: errorDiagnostic(error), durationMs: this.clock.now() - started });
         this.lastVenue = inbox.venueId;
         continue;
       }

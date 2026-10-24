@@ -86,8 +86,17 @@ test('exception before commit rolls back every business effect and blocks only t
     const first = f.admit('operator', { commandId: 'bad', venueId: 'V1', status: 'Maintenance' });
     f.admit('operator', { commandId: 'successor', venueId: 'V1', status: 'Production' });
     f.admit('report', report('good', 'V2'));
-    const processor = new ProcessInboxUseCase(f.store, policy, validation, f.clock, undefined, {
-      beforeCommit(inbox) { if (inbox.sourceId === 'bad') throw new Error('injected processing defect'); },
+    const errors: unknown[] = [];
+    const processor = new ProcessInboxUseCase(f.store, policy, validation, f.clock, {
+      info() {}, warn() {}, error(event, fields) { errors.push({ event, ...fields }); },
+    }, {
+      beforeCommit(inbox) {
+        if (inbox.sourceId === 'bad') {
+          const error = new TypeError('injected processing defect: private-diagnostic-secret');
+          error.name = 'private-error-name-secret';
+          throw error;
+        }
+      },
     });
     assert.equal(processor.runBatch(25), 1);
     assert.equal(f.store.loadVenue('V1'), null);
@@ -95,6 +104,13 @@ test('exception before commit rolls back every business effect and blocks only t
     assert.equal(count(f.store, 'outbox'), 1);
     assert.equal(count(f.store, 'observations'), 1);
     assert.equal(processor.runBatch(25), 0);
+    assert.match(JSON.stringify(errors), /storage\.test\.ts:\d+:\d+/);
+    assert.match(JSON.stringify(errors), /inbox_blocked/);
+    assert.doesNotMatch(JSON.stringify(errors), /private-diagnostic-secret|private-error-name-secret/);
+    const publicState = JSON.stringify([f.store.messageView(first.inboxId), f.store.historyView('V1', 0, 100)]);
+    assert.match(publicState, /PROCESSING_ERROR/);
+    assert.match(publicState, /TypeError/);
+    assert.doesNotMatch(publicState, /private-diagnostic-secret|private-error-name-secret|storage\.test\.ts|diagnostic|frames|internalCause/);
     const recovery = new RecoveryUseCase(f.store, f.clock);
     recovery.execute('inbox', first.inboxId, 'fault injection removed');
     assert.equal(f.processor.runBatch(25), 1);

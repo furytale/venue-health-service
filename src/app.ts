@@ -16,6 +16,7 @@ import { DeliveryDispatcher } from './application/delivery';
 import { HttpErrorFilter, VenueController, UnsupportedMediaTypeError, sendError } from './adapters/http';
 import { JsonLogger } from './adapters/logger';
 import { StorageError } from './domain/errors';
+import { errorDiagnostic } from './application/error-diagnostic';
 
 export class InboxLoop {
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -34,7 +35,7 @@ export class InboxLoop {
         this.outage = false;
       } catch (error) {
         if (!(error instanceof StorageError)) throw error;
-        if (!this.outage) this.logger.error('inbox_processing_unavailable', {component: 'inbox', code: error instanceof Error && 'code' in error ? error.code : 'INTERNAL_ERROR'});
+        if (!this.outage) this.logger.error('inbox_processing_unavailable', {component: 'inbox', code: error.code, diagnostic: errorDiagnostic(error)});
         this.outage = true;
         next = this.settings.storage.retryDelayMs;
       }
